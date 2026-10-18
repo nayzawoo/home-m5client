@@ -38,7 +38,7 @@ Authorization: Bearer <private-device-token>
 Accept: application/json
 ```
 
-The service must return HTTP 200 with a JSON document matching protocol v1 below. Provision the URL and token in `include/config.local.h`. The endpoint path is configurable; the client has no built-in service address.
+The service must return HTTP 200 with a JSON document matching protocol v1 below. Provision the URL and token in `include/config.local.h`. The endpoint path is configurable; the client has no built-in service address. The client advertises `X-UI-Capabilities: marquee`; services should return plain labels to clients that do not advertise this capability.
 
 ## JSON protocol v1
 
@@ -56,10 +56,11 @@ Required top-level fields:
 Supported drawing objects:
 
 - `label`: `type`, `x`, `y`, `color`, `text`, `font`, `size`. Fonts: 1, 2, 4, 7; size: 1–3. Font 7 is a numeric seven-segment font, suitable for the clock. Text is printable ASCII, at most 96 bytes. Burmese/Unicode rendering needs an additional font/rendering implementation.
+- `marquee`: label fields plus a stable `id` (1–32 letters, digits, underscores or hyphens), `w`, `h` and `speed` in pixels per second (1–120). Text may contain up to 192 printable ASCII bytes. The viewport must fit inside the display, with a maximum height of 64 pixels. At most four marquees are supported per frame.
 - `rect`: `type`, `x`, `y`, `color`, `w`, `h`; filled rectangle fully inside the screen.
 - `line`: `type`, `x`, `y`, `color`, `x2`, `y2`; endpoints inside the screen.
 
-Coordinates are integers with origin at the top-left. Text extending beyond the screen is clipped. `id` is optional metadata; v1 redraws the entire frame and does not diff by ID. Colors are converted to an 8-bit sprite palette, so exact RGB reproduction is limited.
+Coordinates are integers with origin at the top-left. Text extending beyond the screen is clipped. `id` is optional metadata for static elements and required for marquees; it preserves their scroll position across refreshes and element reordering. Static content is redrawn when a new frame arrives. Colors are converted to an 8-bit sprite palette, so exact RGB reproduction is limited.
 
 Supported button actions:
 
@@ -70,9 +71,33 @@ Supported button actions:
 
 Only physical button presses trigger actions. Responses cannot run arbitrary code, request another URL, or silently trigger IR/sleep. There is no server event POST in v1: these are local hardware actions selected by the server. Adding a new drawing type, font or device capability requires a firmware update.
 
+## Information text and automatic scrolling
+
+Use a `marquee` object for a bounded information area. The client measures the text using the actual font and size. Text that fits is centered and stays still; only overflowing text scrolls from right to left. Several messages can be merged into a single `text` value with a separator such as ` .. `.
+
+```json
+{
+  "id": "information",
+  "type": "marquee",
+  "text": "Sample reminder .. Another message",
+  "x": 10,
+  "y": 160,
+  "w": 300,
+  "h": 52,
+  "color": "#00FF00",
+  "font": 4,
+  "size": 2,
+  "speed": 30
+}
+```
+
+Overflowing text enters from the right, exits at the left, then repeats after a 24-pixel gap. The animation targets 30 frames per second. Its viewport is opaque, using the frame background, and clips text at all four edges. Keep the viewport separate from other content unless intentional overlap is desired. Text taller than `h` is clipped.
+
+The same ID, text, width, height, font, size and speed preserve the scroll timeline across server refreshes. Color and screen-position changes do not restart it. Changed text or animation settings start a new timeline. Scrolling continues during network requests and outages. A firmware update is required before the device can advertise and render this capability.
+
 ## Failure behavior and limits
 
-Responses are limited to 16 KiB and JSON nesting depth 8. Unsupported versions, elements, actions and out-of-range values reject the entire candidate frame. The last valid frame stays visible while offline or after a rejected response; its clock therefore stops until the next successful fetch. Before the first valid frame, status messages appear on screen. Fetch errors retry after 5 seconds, with Wi-Fi reconnect attempts every 15 seconds. Requests have finite connection/read timeouts and are synchronous, so buttons can be delayed while a request is in flight. Redirects are disabled.
+Responses are limited to 16 KiB and JSON nesting depth 8. Unsupported versions, elements, actions and out-of-range values reject the entire candidate frame. The last valid frame stays visible while offline or after a rejected response; its clock therefore stops until the next successful fetch. Before the first valid frame, status messages appear on screen. Fetch errors retry after 5 seconds, with Wi-Fi reconnect attempts every 15 seconds. Requests have finite connection/read timeouts and run in a separate task, allowing scrolling and button processing to continue while a request is in flight. Redirects are disabled.
 
 ## Tests
 

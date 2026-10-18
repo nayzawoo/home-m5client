@@ -6,13 +6,17 @@
 namespace ui {
 constexpr size_t MAX_BODY = 16384;
 constexpr size_t MAX_ELEMENTS = 32;
-constexpr size_t MAX_TEXT = 96;
-enum class Kind { Label, Rect, Line };
+constexpr size_t MAX_LABEL_TEXT = 96;
+constexpr size_t MAX_TEXT = 192;
+constexpr size_t MAX_MARQUEES = 4;
+constexpr int MAX_MARQUEE_HEIGHT = 64;
+enum class Kind { Label, Rect, Line, Marquee };
 enum class Action { None, Refresh, AcCool, Sleep };
 struct Element {
     Kind kind = Kind::Label;
     int x = 0, y = 0, w = 0, h = 0, x2 = 0, y2 = 0;
-    int font = 2, size = 1;
+    int font = 2, size = 1, speed = 30;
+    char id[33] = {};
     uint32_t color = 0xffffff;
     char text[MAX_TEXT + 1] = {};
 };
@@ -58,6 +62,7 @@ inline bool decode(JsonVariantConst root, Frame &out) {
     JsonArrayConst elements = root["elements"].as<JsonArrayConst>();
     if (elements.size() > MAX_ELEMENTS) return false;
     out.count = 0;
+    size_t marqueeCount = 0;
     for (JsonVariantConst item : elements) {
         if (!item.is<JsonObjectConst>() || !item["type"].is<const char *>() ||
             !integer(item["x"], 0, 319) || !integer(item["y"], 0, 239)) return false;
@@ -65,17 +70,37 @@ inline bool decode(JsonVariantConst root, Frame &out) {
         e.x = item["x"].as<int>(); e.y = item["y"].as<int>();
         if (!color(item["color"], e.color)) return false;
         const char *type = item["type"].as<const char *>();
-        if (std::strcmp(type, "label") == 0) {
-            e.kind = Kind::Label;
+        if (std::strcmp(type, "label") == 0 || std::strcmp(type, "marquee") == 0) {
+            e.kind = std::strcmp(type, "marquee") == 0 ? Kind::Marquee : Kind::Label;
             if (!item["text"].is<const char *>() || !integer(item["size"], 1, 3)) return false;
             const char *text = item["text"].as<const char *>();
-            if (std::strlen(text) > MAX_TEXT) return false;
+            if (std::strlen(text) > (e.kind == Kind::Marquee ? MAX_TEXT : MAX_LABEL_TEXT)) return false;
             for (const unsigned char *p = reinterpret_cast<const unsigned char *>(text); *p; ++p)
                 if (*p < 32 || *p > 126) return false;
             e.font = item["font"].as<int>();
             if (!item["font"].is<int>() || (e.font != 1 && e.font != 2 && e.font != 4 && e.font != 7)) return false;
             e.size = item["size"].as<int>();
             std::strcpy(e.text, text);
+            if (e.kind == Kind::Marquee) {
+                if (++marqueeCount > MAX_MARQUEES || !item["id"].is<const char *>() ||
+                    !integer(item["w"], 1, 320 - e.x) ||
+                    !integer(item["h"], 1, MAX_MARQUEE_HEIGHT) ||
+                    item["h"].as<int>() > 240 - e.y || !integer(item["speed"], 1, 120)) return false;
+                const char *id = item["id"].as<const char *>();
+                size_t length = std::strlen(id);
+                if (length == 0 || length > 32) return false;
+                for (size_t j = 0; j < length; ++j) {
+                    char c = id[j];
+                    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                          (c >= '0' && c <= '9') || c == '_' || c == '-')) return false;
+                }
+                for (size_t j = 0; j < out.count; ++j)
+                    if (out.elements[j].kind == Kind::Marquee &&
+                        std::strcmp(out.elements[j].id, id) == 0) return false;
+                std::strcpy(e.id, id);
+                e.w = item["w"].as<int>(); e.h = item["h"].as<int>();
+                e.speed = item["speed"].as<int>();
+            }
         } else if (std::strcmp(type, "rect") == 0) {
             e.kind = Kind::Rect;
             if (!integer(item["w"], 1, 320 - e.x) || !integer(item["h"], 1, 240 - e.y)) return false;

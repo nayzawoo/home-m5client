@@ -6,17 +6,99 @@
   "brightness": 30,
   "refresh_ms": 1500,
   "elements": [
-    {"id": "clock", "type": "label", "text": "10:20:30", "x": 15, "y": 10, "color": "#FFFFFF", "font": 7, "size": 1},
-    {"id": "separator", "type": "rect", "x": 100, "y": 80, "w": 120, "h": 3, "color": "#D3D3D3"},
-    {"id": "date", "type": "label", "text": "01/Jan/2026(Thu)", "x": 20, "y": 95, "color": "#00FFFF", "font": 4, "size": 1},
-    {"id": "digit", "type": "label", "text": "--", "x": 130, "y": 145, "color": "#FFFF00", "font": 4, "size": 2},
-    {"id": "button-a", "type": "label", "text": "Refresh", "x": 10, "y": 218, "color": "#AAAAAA", "font": 2, "size": 1},
-    {"id": "button-b", "type": "label", "text": "AC cool", "x": 126, "y": 218, "color": "#AAAAAA", "font": 2, "size": 1},
-    {"id": "button-c", "type": "label", "text": "Sleep", "x": 255, "y": 218, "color": "#AAAAAA", "font": 2, "size": 1}
+    {
+      "id": "clock",
+      "type": "label",
+      "text": "10:20:30",
+      "x": 13,
+      "y": 6,
+      "color": "#FFFFFF",
+      "font": 4,
+      "size": 3
+    },
+    {
+      "id": "separator",
+      "type": "rect",
+      "x": 100,
+      "y": 90,
+      "w": 120,
+      "h": 3,
+      "color": "#D3D3D3"
+    },
+    {
+      "id": "date",
+      "type": "label",
+      "text": "01/Jan/2026(Thu)",
+      "x": 12,
+      "y": 104,
+      "color": "#00FFFF",
+      "font": 2,
+      "size": 2
+    },
+    {
+      "id": "digit",
+      "type": "label",
+      "text": "+-",
+      "x": 265,
+      "y": 104,
+      "color": "#FFFF00",
+      "font": 4,
+      "size": 2
+    },
+    {
+      "id": "button-a",
+      "type": "label",
+      "text": "Refresh",
+      "x": 10,
+      "y": 218,
+      "color": "#AAAAAA",
+      "font": 2,
+      "size": 1
+    },
+    {
+      "id": "button-b",
+      "type": "label",
+      "text": "AC cool",
+      "x": 126,
+      "y": 218,
+      "color": "#AAAAAA",
+      "font": 2,
+      "size": 1
+    },
+    {
+      "id": "button-c",
+      "type": "label",
+      "text": "Sleep",
+      "x": 255,
+      "y": 218,
+      "color": "#AAAAAA",
+      "font": 2,
+      "size": 1
+    },
+    {
+      "id": "information",
+      "type": "marquee",
+      "text": "Sample information .. Another scrolling message",
+      "x": 10,
+      "y": 160,
+      "w": 300,
+      "h": 52,
+      "color": "#00FF00",
+      "font": 4,
+      "size": 2,
+      "speed": 30
+    }
   ],
   "buttons": {
-    "A": {"action": "refresh"},
-    "B": {"action": "ac_cool"},
-    "C": {"action": "sleep", "seconds": 36000}
+    "A": {
+      "action": "refresh"
+    },
+    "B": {
+      "action": "ac_cool"
+    },
+    "C": {
+      "action": "sleep",
+      "seconds": 36000
+    }
   }
 }
