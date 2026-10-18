@@ -2,12 +2,12 @@
 #include "ui_protocol.h"
 
 namespace ui {
-inline bool sameMarquee(const Element &a, const Element &b) {
+// Same track = same id. Text/color/speed updates keep scrolling; only a new id restarts.
+inline bool sameMarqueeTrack(const Element &a, const Element &b) {
     return a.kind == Kind::Marquee && b.kind == Kind::Marquee &&
-        std::strcmp(a.id, b.id) == 0 && std::strcmp(a.text, b.text) == 0 &&
-        a.w == b.w && a.h == b.h && a.font == b.font && a.size == b.size && a.speed == b.speed;
+        std::strcmp(a.id, b.id) == 0;
 }
-// Animation state belongs to stable IDs, independent of element order or clock updates.
+// Animation state belongs to stable IDs, independent of clock refreshes or copy updates.
 struct MarqueeTimeline {
     uint32_t started[MAX_ELEMENTS] = {};
     void sync(const Frame &previous, const Frame &next, uint32_t now) {
@@ -16,7 +16,7 @@ struct MarqueeTimeline {
             if (next.elements[i].kind != Kind::Marquee) continue;
             updated[i] = now;
             for (size_t j = 0; j < previous.count; ++j) {
-                if (sameMarquee(previous.elements[j], next.elements[i])) {
+                if (sameMarqueeTrack(previous.elements[j], next.elements[i])) {
                     updated[i] = started[j];
                     break;
                 }

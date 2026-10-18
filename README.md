@@ -93,7 +93,7 @@ Use a `marquee` object for a bounded information area. The client measures the t
 
 Overflowing text enters from the right, exits at the left, then repeats after a 24-pixel gap. The animation targets 30 frames per second. Its viewport is opaque, using the frame background, and clips text at all four edges. Keep the viewport separate from other content unless intentional overlap is desired. Text taller than `h` is clipped.
 
-The same ID, text, width, height, font, size and speed preserve the scroll timeline across server refreshes. Color and screen-position changes do not restart it. Changed text or animation settings start a new timeline. Between successful fetches the marquee keeps scrolling on the Arduino loop; a brief pause during an in-flight HTTP request is expected. A firmware update is required before the device can advertise and render this capability.
+A stable marquee `id` keeps one continuous scroll timeline across server refreshes. Updated text, color, speed and position are picked up by that same loop without restarting or stacking a second animation. The content refresh path redraws clock/labels only; the marquee strip is advanced solely by the 30fps painter. A firmware update is required before the device can advertise and render this capability.
 
 ## Failure behavior and limits
 

@@ -66,36 +66,36 @@ void applyBrightness() {
     appliedBrightness = frame.brightness;
     M5.Lcd.setBrightness(frame.brightness);
 }
-void drawMarquee(const ui::Element &e, size_t index, uint32_t now) {
-    if (!marqueeReady) return;
-    marqueeCanvas.fillSprite(rgb(frame.background));
-    marqueeCanvas.setTextColor(rgb(e.color));
-    marqueeCanvas.setTextSize(e.size);
-    int textWidth = marqueeCanvas.textWidth(e.text, e.font);
-    animating = true;
-    int x = ui::marqueeX(e, textWidth, timeline.started[index], now);
-    marqueeCanvas.drawString(e.text, x, 0, e.font);
-    // Push only the viewport strip — avoids a full-screen blit.
-    uint16_t row[320];
-    for (int y = 0; y < e.h; ++y) {
-        for (int column = 0; column < e.w; ++column)
-            row[column] = marqueeCanvas.readPixel(column, y);
-        M5.Lcd.pushImage(e.x, e.y + y, e.w, 1, row);
-    }
-}
-// clearBackground: full wipe (first paint / layout shrink). Otherwise update in place.
-// Marquee-only passes skip labels/rects so the rest of the screen stays put.
-void render(uint32_t now, bool clearBackground, bool marqueeOnly) {
+void paintMarquees(uint32_t now) {
     animating = false;
+    if (!marqueeReady) return;
+    const uint16_t bg = rgb(frame.background);
+    for (size_t i = 0; i < frame.count; ++i) {
+        const auto &e = frame.elements[i];
+        if (e.kind != ui::Kind::Marquee) continue;
+        marqueeCanvas.fillSprite(bg);
+        marqueeCanvas.setTextColor(rgb(e.color));
+        marqueeCanvas.setTextSize(e.size);
+        int textWidth = marqueeCanvas.textWidth(e.text, e.font);
+        animating = true;
+        int x = ui::marqueeX(e, textWidth, timeline.started[i], now);
+        marqueeCanvas.drawString(e.text, x, 0, e.font);
+        uint16_t row[320];
+        for (int y = 0; y < e.h; ++y) {
+            for (int column = 0; column < e.w; ++column)
+                row[column] = marqueeCanvas.readPixel(column, y);
+            M5.Lcd.pushImage(e.x, e.y + y, e.w, 1, row);
+        }
+    }
+    lastRender = now;
+}
+// Content refresh: labels/rects/background only. Marquee keeps one continuous scroll loop.
+void renderContent(uint32_t now, bool clearBackground) {
     const uint16_t bg = rgb(frame.background);
     if (clearBackground) M5.Lcd.fillScreen(bg);
     for (size_t i = 0; i < frame.count; ++i) {
         const auto &e = frame.elements[i];
-        if (e.kind == ui::Kind::Marquee) {
-            drawMarquee(e, i, now);
-            continue;
-        }
-        if (marqueeOnly) continue;
+        if (e.kind == ui::Kind::Marquee) continue;
         if (e.kind == ui::Kind::Label) {
             // Opaque text erases previous glyphs (clock digits) without a screen wipe.
             M5.Lcd.setTextColor(rgb(e.color), bg);
@@ -107,8 +107,10 @@ void render(uint32_t now, bool clearBackground, bool marqueeOnly) {
             M5.Lcd.drawLine(e.x, e.y, e.x2, e.y2, rgb(e.color));
         }
     }
-    if (!marqueeOnly) applyBrightness();
-    lastRender = now;
+    animating = ui::hasMarquee(frame);
+    applyBrightness();
+    // After a full wipe, seed the strip once; afterward only paintMarquees advances it.
+    if (clearBackground && animating) paintMarquees(now);
 }
 bool acceptFrame(uint32_t now) {
     if (!ensureMarquee(candidate)) return false;
@@ -117,7 +119,7 @@ bool acceptFrame(uint32_t now) {
     timeline.sync(frame, candidate, now);
     frame = candidate;
     hasFrame = true;
-    render(now, firstPaint || lostMarquee, false);
+    renderContent(now, firstPaint || lostMarquee);
     return true;
 }
 bool fetch() {
@@ -209,7 +211,7 @@ void loop() {
         bool ok = fetch();
         nextFetch = millis() + (ok ? frame.refreshMs : 5000);
     }
-    // Marquee-only updates — do not clear or repaint the rest of the screen.
-    if (hasFrame && animating && tick - lastRender >= 33) render(tick, false, true);
+    // Single continuous marquee loop; content refresh never restarts or restacks it.
+    if (hasFrame && animating && tick - lastRender >= 33) paintMarquees(tick);
     delay(10);
 }

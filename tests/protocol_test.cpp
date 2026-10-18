@@ -77,13 +77,18 @@ int main(int argc, char **argv) {
     timeline.sync(previous, next, 1000);
     assert(timeline.started[6] == 100);
     previous = next;
+    // Text/speed updates keep the same track timeline so scrolling stays continuous.
     std::strcpy(next.elements[6].text, "New information");
     timeline.sync(previous, next, 1500);
-    assert(timeline.started[6] == 1500);
+    assert(timeline.started[6] == 100);
     previous = next;
     next.elements[6].speed = 60;
     timeline.sync(previous, next, 2000);
-    assert(timeline.started[6] == 2000);
+    assert(timeline.started[6] == 100);
+    previous = next;
+    std::strcpy(next.elements[6].id, "other");
+    timeline.sync(previous, next, 2500);
+    assert(timeline.started[6] == 2500);
     ui::Element marquee = frame.elements[7];
     // Short and long text both scroll from the right edge of the viewport.
     assert(ui::marqueeX(marquee, 200, 100, 1100) == 270);
