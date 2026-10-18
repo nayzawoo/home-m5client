@@ -13,11 +13,13 @@
 #endif
 
 namespace {
-TFT_eSprite canvas(&M5.Lcd);
+// Marquee scratch only (~20 KiB). No full-screen sprite — that ~76 KiB heap
+// allocation forced a free/recreate around every HTTPS fetch and flashed the LCD.
 TFT_eSprite marqueeCanvas(&M5.Lcd);
 ui::Frame frame, candidate;
 ui::MarqueeTimeline timeline;
-bool canvasReady = false, marqueeReady = false, animating = false;
+bool marqueeReady = false, animating = false;
+uint8_t appliedBrightness = 0;
 uint32_t lastRender = 0;
 IRDaikin64 ac(device_config::IR_SEND_PIN);
 uint32_t nextFetch = 0, lastReconnect = 0;
@@ -51,24 +53,6 @@ public:
     int peek() override { return -1; }
     void flush() override {}
 };
-// LCD retains the last pushSprite pixels; free sprite RAM so TLS can allocate.
-void releaseDisplayBuffers() {
-    if (marqueeReady) {
-        marqueeCanvas.deleteSprite();
-        marqueeReady = false;
-    }
-    if (canvasReady) {
-        canvas.deleteSprite();
-        canvasReady = false;
-    }
-}
-bool ensureCanvas() {
-    if (canvasReady) return true;
-    canvas.setColorDepth(8);
-    canvasReady = canvas.createSprite(320, 240) != nullptr;
-    if (!canvasReady) status("Display allocation failed");
-    return canvasReady;
-}
 bool ensureMarquee(const ui::Frame &source) {
     if (!ui::hasMarquee(source)) return true;
     if (marqueeReady) return true;
@@ -77,54 +61,66 @@ bool ensureMarquee(const ui::Frame &source) {
     if (!marqueeReady) status("Marquee allocation failed");
     return marqueeReady;
 }
-bool restoreDisplayBuffers() {
-    return ensureCanvas() && ensureMarquee(frame);
+void applyBrightness() {
+    if (frame.brightness == appliedBrightness) return;
+    appliedBrightness = frame.brightness;
+    M5.Lcd.setBrightness(frame.brightness);
 }
-void render(uint32_t now) {
-    if (!canvasReady) return;
+void drawMarquee(const ui::Element &e, size_t index, uint32_t now) {
+    if (!marqueeReady) return;
+    marqueeCanvas.fillSprite(rgb(frame.background));
+    marqueeCanvas.setTextColor(rgb(e.color));
+    marqueeCanvas.setTextSize(e.size);
+    int textWidth = marqueeCanvas.textWidth(e.text, e.font);
+    animating = true;
+    int x = ui::marqueeX(e, textWidth, timeline.started[index], now);
+    marqueeCanvas.drawString(e.text, x, 0, e.font);
+    // Push only the viewport strip — avoids a full-screen blit.
+    uint16_t row[320];
+    for (int y = 0; y < e.h; ++y) {
+        for (int column = 0; column < e.w; ++column)
+            row[column] = marqueeCanvas.readPixel(column, y);
+        M5.Lcd.pushImage(e.x, e.y + y, e.w, 1, row);
+    }
+}
+// clearBackground: full wipe (first paint / layout shrink). Otherwise update in place.
+// Marquee-only passes skip labels/rects so the rest of the screen stays put.
+void render(uint32_t now, bool clearBackground, bool marqueeOnly) {
     animating = false;
-    canvas.fillSprite(rgb(frame.background));
+    const uint16_t bg = rgb(frame.background);
+    if (clearBackground) M5.Lcd.fillScreen(bg);
     for (size_t i = 0; i < frame.count; ++i) {
         const auto &e = frame.elements[i];
+        if (e.kind == ui::Kind::Marquee) {
+            drawMarquee(e, i, now);
+            continue;
+        }
+        if (marqueeOnly) continue;
         if (e.kind == ui::Kind::Label) {
-            canvas.setTextColor(rgb(e.color));
-            canvas.setTextSize(e.size);
-            canvas.drawString(e.text, e.x, e.y, e.font);
-        } else if (e.kind == ui::Kind::Marquee) {
-            if (!marqueeReady) continue;
-            marqueeCanvas.fillSprite(rgb(frame.background));
-            marqueeCanvas.setTextColor(rgb(e.color));
-            marqueeCanvas.setTextSize(e.size);
-            int textWidth = marqueeCanvas.textWidth(e.text, e.font);
-            animating = true;
-            int x = ui::marqueeX(e, textWidth, timeline.started[i], now);
-            marqueeCanvas.drawString(e.text, x, 0, e.font);
-            uint16_t row[320];
-            // Copy only the viewport, including its opaque background, into the frame.
-            for (int y = 0; y < e.h; ++y) {
-                for (int column = 0; column < e.w; ++column)
-                    row[column] = marqueeCanvas.readPixel(column, y);
-                canvas.pushImage(e.x, e.y + y, e.w, 1, row);
-            }
-        } else if (e.kind == ui::Kind::Rect) canvas.fillRect(e.x, e.y, e.w, e.h, rgb(e.color));
-        else canvas.drawLine(e.x, e.y, e.x2, e.y2, rgb(e.color));
+            // Opaque text erases previous glyphs (clock digits) without a screen wipe.
+            M5.Lcd.setTextColor(rgb(e.color), bg);
+            M5.Lcd.setTextSize(e.size);
+            M5.Lcd.drawString(e.text, e.x, e.y, e.font);
+        } else if (e.kind == ui::Kind::Rect) {
+            M5.Lcd.fillRect(e.x, e.y, e.w, e.h, rgb(e.color));
+        } else {
+            M5.Lcd.drawLine(e.x, e.y, e.x2, e.y2, rgb(e.color));
+        }
     }
-    canvas.pushSprite(0, 0);
-    M5.Lcd.setBrightness(frame.brightness);
+    if (!marqueeOnly) applyBrightness();
     lastRender = now;
 }
 bool acceptFrame(uint32_t now) {
-    if (!ensureCanvas() || !ensureMarquee(candidate)) return false;
+    if (!ensureMarquee(candidate)) return false;
+    const bool firstPaint = !hasFrame;
+    const bool lostMarquee = ui::hasMarquee(frame) && !ui::hasMarquee(candidate);
     timeline.sync(frame, candidate, now);
     frame = candidate;
     hasFrame = true;
-    render(now);
+    render(now, firstPaint || lostMarquee, false);
     return true;
 }
 bool fetch() {
-    // mbedTLS needs a large contiguous heap block; the 8-bit 320×240 sprite
-    // alone is ~76 KiB and causes SSL -32512 (memory allocation failed).
-    releaseDisplayBuffers();
     WiFiClient plain;
     WiFiClientSecure secure;
     HTTPClient http;
@@ -133,43 +129,29 @@ bool fetch() {
     if (https) {
         secure.setInsecure();
     } else if (!url.startsWith("http://") || !device_config::ALLOW_HTTP) {
-        status("HTTPS required");
-        if (hasFrame) restoreDisplayBuffers();
-        return false;
+        status("HTTPS required"); return false;
     }
     http.setConnectTimeout(3000);
     http.setTimeout(3000);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
     WiFiClient &transport = https ? static_cast<WiFiClient &>(secure) : plain;
-    if (!http.begin(transport, url)) {
-        if (hasFrame) restoreDisplayBuffers();
-        return false;
-    }
+    if (!http.begin(transport, url)) return false;
     http.addHeader("Accept", "application/json");
     http.addHeader("X-UI-Capabilities", "marquee");
     http.addHeader("Authorization", String("Bearer ") + device_config::API_TOKEN);
     int code = http.GET();
     if (code != HTTP_CODE_OK || http.getSize() > static_cast<int>(ui::MAX_BODY)) {
-        http.end();
-        status("UI request failed");
-        if (hasFrame) restoreDisplayBuffers();
-        return false;
+        http.end(); status("UI request failed"); return false;
     }
     BoundedBody body;
     int received = http.writeToStream(&body);
     http.end();
-    if (received < 0 || body.overflow) {
-        status("UI response rejected");
-        if (hasFrame) restoreDisplayBuffers();
-        return false;
-    }
+    if (received < 0 || body.overflow) { status("UI response rejected"); return false; }
     JsonDocument document;
     auto error = deserializeJson(document, body.text, DeserializationOption::NestingLimit(8));
     body.text = String();
     if (error || !ui::decode(document.as<JsonVariantConst>(), candidate)) {
-        status("Invalid UI document");
-        if (hasFrame) restoreDisplayBuffers();
-        return false;
+        status("Invalid UI document"); return false;
     }
     document = JsonDocument();
     return acceptFrame(millis());
@@ -202,8 +184,8 @@ void setup() {
     M5.Speaker.end();
     M5.Lcd.setRotation(1);
     M5.Lcd.setBrightness(20);
+    appliedBrightness = 20;
     M5.Power.setWakeupButton(BUTTON_B_PIN);
-    // Defer sprite allocation until after the first TLS handshake succeeds.
     configured = device_config::WIFI_SSID[0] && device_config::UI_URL[0] && device_config::API_TOKEN[0];
     if (!configured) { status("Configure config.local.h"); return; }
     if (device_config::ENABLE_IR) ac.begin();
@@ -227,6 +209,7 @@ void loop() {
         bool ok = fetch();
         nextFetch = millis() + (ok ? frame.refreshMs : 5000);
     }
-    if (hasFrame && canvasReady && animating && tick - lastRender >= 33) render(tick);
+    // Marquee-only updates — do not clear or repaint the rest of the screen.
+    if (hasFrame && animating && tick - lastRender >= 33) render(tick, false, true);
     delay(10);
 }
