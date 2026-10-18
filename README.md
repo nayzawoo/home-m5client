@@ -93,11 +93,11 @@ Use a `marquee` object for a bounded information area. The client measures the t
 
 Overflowing text enters from the right, exits at the left, then repeats after a 24-pixel gap. The animation targets 30 frames per second. Its viewport is opaque, using the frame background, and clips text at all four edges. Keep the viewport separate from other content unless intentional overlap is desired. Text taller than `h` is clipped.
 
-The same ID, text, width, height, font, size and speed preserve the scroll timeline across server refreshes. Color and screen-position changes do not restart it. Changed text or animation settings start a new timeline. Scrolling continues during network requests and outages. A firmware update is required before the device can advertise and render this capability.
+The same ID, text, width, height, font, size and speed preserve the scroll timeline across server refreshes. Color and screen-position changes do not restart it. Changed text or animation settings start a new timeline. Between successful fetches the marquee keeps scrolling on the Arduino loop; a brief pause during an in-flight HTTP request is expected. A firmware update is required before the device can advertise and render this capability.
 
 ## Failure behavior and limits
 
-Responses are limited to 16 KiB and JSON nesting depth 8. Unsupported versions, elements, actions and out-of-range values reject the entire candidate frame. The last valid frame stays visible while offline or after a rejected response; its clock therefore stops until the next successful fetch. Before the first valid frame, status messages appear on screen. Fetch errors retry after 5 seconds, with Wi-Fi reconnect attempts every 15 seconds. Requests have finite connection/read timeouts and run in a separate task, allowing scrolling and button processing to continue while a request is in flight. Redirects are disabled.
+Responses are limited to 16 KiB and JSON nesting depth 8. Unsupported versions, elements, actions and out-of-range values reject the entire candidate frame. The last valid frame stays visible while offline or after a rejected response; its clock therefore stops until the next successful fetch. Before the first valid frame, status messages appear on screen. Fetch errors retry after 5 seconds, with Wi-Fi reconnect attempts every 15 seconds. Requests have finite connection/read timeouts and run on the Arduino loop (not a FreeRTOS network task), which keeps ESP32 `HTTPClient` / TLS socket reuse reliable across repeated refreshes. Redirects are disabled.
 
 ## Tests
 
