@@ -17,7 +17,7 @@ TFT_eSprite canvas(&M5.Lcd);
 TFT_eSprite marqueeCanvas(&M5.Lcd);
 ui::Frame frame, candidate;
 ui::MarqueeTimeline timeline;
-bool marqueeReady = false, animating = false;
+bool canvasReady = false, marqueeReady = false, animating = false;
 uint32_t lastRender = 0;
 IRDaikin64 ac(device_config::IR_SEND_PIN);
 uint32_t nextFetch = 0, lastReconnect = 0;
@@ -40,7 +40,6 @@ class BoundedBody : public Stream {
 public:
     String text;
     bool overflow = false;
-    BoundedBody() { text.reserve(ui::MAX_BODY); }
     size_t write(uint8_t c) override { return write(&c, 1); }
     size_t write(const uint8_t *data, size_t length) override {
         if (length > ui::MAX_BODY - text.length()) { overflow = true; return 0; }
@@ -52,7 +51,37 @@ public:
     int peek() override { return -1; }
     void flush() override {}
 };
+// LCD retains the last pushSprite pixels; free sprite RAM so TLS can allocate.
+void releaseDisplayBuffers() {
+    if (marqueeReady) {
+        marqueeCanvas.deleteSprite();
+        marqueeReady = false;
+    }
+    if (canvasReady) {
+        canvas.deleteSprite();
+        canvasReady = false;
+    }
+}
+bool ensureCanvas() {
+    if (canvasReady) return true;
+    canvas.setColorDepth(8);
+    canvasReady = canvas.createSprite(320, 240) != nullptr;
+    if (!canvasReady) status("Display allocation failed");
+    return canvasReady;
+}
+bool ensureMarquee(const ui::Frame &source) {
+    if (!ui::hasMarquee(source)) return true;
+    if (marqueeReady) return true;
+    marqueeCanvas.setColorDepth(8);
+    marqueeReady = marqueeCanvas.createSprite(320, ui::MAX_MARQUEE_HEIGHT) != nullptr;
+    if (!marqueeReady) status("Marquee allocation failed");
+    return marqueeReady;
+}
+bool restoreDisplayBuffers() {
+    return ensureCanvas() && ensureMarquee(frame);
+}
 void render(uint32_t now) {
+    if (!canvasReady) return;
     animating = false;
     canvas.fillSprite(rgb(frame.background));
     for (size_t i = 0; i < frame.count; ++i) {
@@ -62,6 +91,7 @@ void render(uint32_t now) {
             canvas.setTextSize(e.size);
             canvas.drawString(e.text, e.x, e.y, e.font);
         } else if (e.kind == ui::Kind::Marquee) {
+            if (!marqueeReady) continue;
             marqueeCanvas.fillSprite(rgb(frame.background));
             marqueeCanvas.setTextColor(rgb(e.color));
             marqueeCanvas.setTextSize(e.size);
@@ -84,11 +114,7 @@ void render(uint32_t now) {
     lastRender = now;
 }
 bool acceptFrame(uint32_t now) {
-    if (ui::hasMarquee(candidate) && !marqueeReady) {
-        marqueeCanvas.setColorDepth(8);
-        marqueeReady = marqueeCanvas.createSprite(320, ui::MAX_MARQUEE_HEIGHT) != nullptr;
-        if (!marqueeReady) { status("Marquee allocation failed"); return false; }
-    }
+    if (!ensureCanvas() || !ensureMarquee(candidate)) return false;
     timeline.sync(frame, candidate, now);
     frame = candidate;
     hasFrame = true;
@@ -96,6 +122,9 @@ bool acceptFrame(uint32_t now) {
     return true;
 }
 bool fetch() {
+    // mbedTLS needs a large contiguous heap block; the 8-bit 320×240 sprite
+    // alone is ~76 KiB and causes SSL -32512 (memory allocation failed).
+    releaseDisplayBuffers();
     WiFiClient plain;
     WiFiClientSecure secure;
     HTTPClient http;
@@ -104,29 +133,45 @@ bool fetch() {
     if (https) {
         secure.setInsecure();
     } else if (!url.startsWith("http://") || !device_config::ALLOW_HTTP) {
-        status("HTTPS required"); return false;
+        status("HTTPS required");
+        if (hasFrame) restoreDisplayBuffers();
+        return false;
     }
     http.setConnectTimeout(3000);
     http.setTimeout(3000);
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
     WiFiClient &transport = https ? static_cast<WiFiClient &>(secure) : plain;
-    if (!http.begin(transport, url)) return false;
+    if (!http.begin(transport, url)) {
+        if (hasFrame) restoreDisplayBuffers();
+        return false;
+    }
     http.addHeader("Accept", "application/json");
     http.addHeader("X-UI-Capabilities", "marquee");
     http.addHeader("Authorization", String("Bearer ") + device_config::API_TOKEN);
     int code = http.GET();
     if (code != HTTP_CODE_OK || http.getSize() > static_cast<int>(ui::MAX_BODY)) {
-        http.end(); status("UI request failed"); return false;
+        http.end();
+        status("UI request failed");
+        if (hasFrame) restoreDisplayBuffers();
+        return false;
     }
     BoundedBody body;
     int received = http.writeToStream(&body);
     http.end();
-    if (received < 0 || body.overflow) { status("UI response rejected"); return false; }
+    if (received < 0 || body.overflow) {
+        status("UI response rejected");
+        if (hasFrame) restoreDisplayBuffers();
+        return false;
+    }
     JsonDocument document;
     auto error = deserializeJson(document, body.text, DeserializationOption::NestingLimit(8));
+    body.text = String();
     if (error || !ui::decode(document.as<JsonVariantConst>(), candidate)) {
-        status("Invalid UI document"); return false;
+        status("Invalid UI document");
+        if (hasFrame) restoreDisplayBuffers();
+        return false;
     }
+    document = JsonDocument();
     return acceptFrame(millis());
 }
 void press(const ui::Button &button) {
@@ -158,8 +203,7 @@ void setup() {
     M5.Lcd.setRotation(1);
     M5.Lcd.setBrightness(20);
     M5.Power.setWakeupButton(BUTTON_B_PIN);
-    canvas.setColorDepth(8);
-    if (!canvas.createSprite(320, 240)) { status("Display allocation failed"); return; }
+    // Defer sprite allocation until after the first TLS handshake succeeds.
     configured = device_config::WIFI_SSID[0] && device_config::UI_URL[0] && device_config::API_TOKEN[0];
     if (!configured) { status("Configure config.local.h"); return; }
     if (device_config::ENABLE_IR) ac.begin();
@@ -183,6 +227,6 @@ void loop() {
         bool ok = fetch();
         nextFetch = millis() + (ok ? frame.refreshMs : 5000);
     }
-    if (hasFrame && animating && tick - lastRender >= 33) render(tick);
+    if (hasFrame && canvasReady && animating && tick - lastRender >= 33) render(tick);
     delay(10);
 }

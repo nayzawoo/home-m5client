@@ -97,7 +97,7 @@ The same ID, text, width, height, font, size and speed preserve the scroll timel
 
 ## Failure behavior and limits
 
-Responses are limited to 16 KiB and JSON nesting depth 8. Unsupported versions, elements, actions and out-of-range values reject the entire candidate frame. The last valid frame stays visible while offline or after a rejected response; its clock therefore stops until the next successful fetch. Before the first valid frame, status messages appear on screen. Fetch errors retry after 5 seconds, with Wi-Fi reconnect attempts every 15 seconds. Requests have finite connection/read timeouts and run on the Arduino loop (not a FreeRTOS network task), which keeps ESP32 `HTTPClient` / TLS socket reuse reliable across repeated refreshes. Redirects are disabled.
+Responses are limited to 16 KiB and JSON nesting depth 8. Unsupported versions, elements, actions and out-of-range values reject the entire candidate frame. The last valid frame stays visible while offline or after a rejected response; its clock therefore stops until the next successful fetch. Before the first valid frame, status messages appear on screen. Fetch errors retry after 5 seconds, with Wi-Fi reconnect attempts every 15 seconds. Requests have finite connection/read timeouts and run on the Arduino loop. Before each HTTPS handshake the firmware frees the display sprites (~76 KiB) so mbedTLS can allocate; the LCD keeps the last image, then sprites are recreated to render the new frame. Redirects are disabled.
 
 ## Tests
 
