@@ -26,9 +26,10 @@ struct MarqueeTimeline {
     }
 };
 inline int marqueeX(const Element &element, int textWidth, uint32_t started, uint32_t now) {
-    if (textWidth <= element.w) return (element.w - textWidth) / 2;
+    // Always scroll: short messages still enter from the right so the row looks alive.
+    const int span = textWidth > 0 ? textWidth : element.w;
     const uint32_t elapsed = now - started;
-    const uint32_t period = static_cast<uint32_t>(element.w + textWidth + 24);
+    const uint32_t period = static_cast<uint32_t>(element.w + span + 24);
     const uint64_t pixels = static_cast<uint64_t>(elapsed) * element.speed / 1000;
     return element.w - static_cast<int>(pixels % period);
 }
