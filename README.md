@@ -73,7 +73,7 @@ Only physical button presses trigger actions. Responses cannot run arbitrary cod
 
 ## Information text and automatic scrolling
 
-Use a `marquee` object for a bounded information area. The client measures the text using the actual font and size. Text that fits is centered and stays still; only overflowing text scrolls from right to left. Several messages can be merged into a single `text` value with a separator such as ` .. `.
+Use a `marquee` object for a bounded information area. The client measures the text using the actual font and size and always scrolls it from right to left (short messages included). Several messages can be merged into a single `text` value with a separator such as ` .. `.
 
 ```json
 {

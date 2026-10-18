@@ -74,7 +74,7 @@ void render(uint32_t now) {
             marqueeCanvas.setTextColor(rgb(e.color));
             marqueeCanvas.setTextSize(e.size);
             int textWidth = marqueeCanvas.textWidth(e.text, e.font);
-            if (textWidth > e.w) animating = true;
+            animating = true;
             int x = ui::marqueeX(e, textWidth, timeline.started[i], now);
             marqueeCanvas.drawString(e.text, x, 0, e.font);
             uint16_t row[320];

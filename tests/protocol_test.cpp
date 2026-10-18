@@ -85,8 +85,9 @@ int main(int argc, char **argv) {
     timeline.sync(previous, next, 2000);
     assert(timeline.started[6] == 2000);
     ui::Element marquee = frame.elements[7];
-    assert(ui::marqueeX(marquee, 200, 100, 1100) == 50); // Fits: centered and static.
-    assert(ui::marqueeX(marquee, 300, 100, 1100) == 0);
+    // Short and long text both scroll from the right edge of the viewport.
+    assert(ui::marqueeX(marquee, 200, 100, 1100) == 270);
+    assert(ui::marqueeX(marquee, 300, 100, 1100) == 270);
     assert(ui::marqueeX(marquee, 500, 100, 100) == 300);
     assert(ui::marqueeX(marquee, 500, 100, 1100) == 270);
     assert(ui::marqueeX(marquee, 500, UINT32_MAX - 500, 499) == 270);
