@@ -1,0 +1,12 @@
+.pio/
+.vscode/
+.DS_Store
+.env
+.env.*
+!.env.example
+include/config.local.h
+*.pem
+*.key
+*.bin
+*.elf
+*.log

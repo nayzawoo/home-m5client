@@ -1,0 +1,16 @@
+name: Build and test
+on: [push, pull_request]
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.1.18 intelhex==2.3.0
+      - run: pio run
+      - name: Test UI protocol
+        run: |
+          c++ -std=c++17 -Wall -Wextra -pedantic -Iinclude -I.pio/libdeps/m5stack-core-esp32/ArduinoJson/src tests/protocol_test.cpp -o /tmp/m5-ui-protocol-test
+          /tmp/m5-ui-protocol-test examples/ui.json
